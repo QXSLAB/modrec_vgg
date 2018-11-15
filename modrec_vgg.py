@@ -66,42 +66,80 @@ def load_data():
     return X, y
 
 
-class Discriminator(nn.Module):
+class VGGNet(nn.Module):
 
-    print("Define the model")
+    print("Define VGG Net")
 
-    def __init__(self, dr=0.6):
-        super(Discriminator, self).__init__()
+    def __init__(self):
+        super(VGGNet, self).__init__()
         self.conv1 = nn.Sequential(
-            nn.Conv1d(2, 256, 3, padding=1),  # batch, 256, 1024
-            nn.BatchNorm1d(256),
+            nn.Conv1d(2, 64, 3, padding=1),  # batch, 64, 1024
+            nn.MaxPool1d(2),  # batch, 64, 512
+            nn.BatchNorm1d(64),
             nn.ReLU(),
-            # nn.Dropout2d()
         )
         self.conv2 = nn.Sequential(
-            nn.Conv1d(256, 80, 3, padding=1),  # batch, 80, 1024
-            nn.BatchNorm1d(80),
+            nn.Conv1d(64, 64, 3, padding=1),  # batch, 64, 512
+            nn.MaxPool1d(2),  # batch, 64, 256
+            nn.BatchNorm1d(64),
             nn.ReLU(),
-            # nn.Dropout2d()
+        )
+        self.conv3 = nn.Sequential(
+            nn.Conv1d(64, 64, 3, padding=1),  # batch, 64, 256
+            nn.MaxPool1d(2),  # batch, 64, 128
+            nn.BatchNorm1d(64),
+            nn.ReLU(),
+        )
+        self.conv4 = nn.Sequential(
+            nn.Conv1d(64, 64, 3, padding=1),  # batch, 64, 128
+            nn.MaxPool1d(2),  # batch, 64, 64
+            nn.BatchNorm1d(64),
+            nn.ReLU(),
+        )
+        self.conv5 = nn.Sequential(
+            nn.Conv1d(64, 64, 3, padding=1),  # batch, 64, 64
+            nn.MaxPool1d(2),  # batch, 64, 32
+            nn.BatchNorm1d(64),
+            nn.ReLU(),
+        )
+        self.conv6 = nn.Sequential(
+            nn.Conv1d(64, 64, 3, padding=1),  # batch, 64, 32
+            nn.MaxPool1d(2),  # batch, 64, 16
+            nn.BatchNorm1d(64),
+            nn.ReLU(),
+        )
+        self.conv7 = nn.Sequential(
+            nn.Conv1d(64, 64, 3, padding=1),  # batch, 64, 16
+            nn.MaxPool1d(2),  # batch, 64, 8
+            nn.BatchNorm1d(64),
+            nn.ReLU(),
         )
         self.fc1 = nn.Sequential(
-            nn.Linear(80 * 1024, 256),
-            nn.BatchNorm1d(256),
-            nn.ReLU(),
-            nn.Dropout(p=dr)
+            nn.Linear(64 * 8, 128),
+            nn.ReLU()
         )
         self.fc2 = nn.Sequential(
-            nn.Linear(256, class_num),
+            nn.Linear(128, 128),
             nn.ReLU()
+        )
+        self.fc3 = nn.Sequential(
+            nn.Linear(128, class_num),
+            # nn.Softmax(dim=1)
         )
 
     def forward(self, x, **kwargs):
         x = x.reshape((x.size(0), 2, -1))
         x = self.conv1(x)
         x = self.conv2(x)
+        x = self.conv3(x)
+        x = self.conv4(x)
+        x = self.conv5(x)
+        x = self.conv6(x)
+        x = self.conv7(x)
         x = x.view(x.size(0), -1)
         x = self.fc1(x)
         x = self.fc2(x)
+        x = self.fc3(x)
         x = F.softmax(x, dim=1)
         return x
 
@@ -153,16 +191,21 @@ class Score_ConfusionMatrix(EpochScoring):
         X_test, y_test = data_from_dataset(dataset_valid)
         y_pred = net.predict(X_test)
         cm = confusion_matrix(y_test, y_pred)
+        sample_num = np.sum(cm, axis=1)
+        sample_num = np.tile(sample_num, (sample_num.size, 1))
+        cm = cm * (1/np.transpose(sample_num))
+        cm = np.round(cm*100)
+        cm1 = cm.astype(np.int8)
         history = net.history
-        history.record("confusion_matrix", cm)
+        history.record("confusion_matrix", cm1)
 
 
 def train():
 
-    disc = Discriminator()
+    disc = VGGNet()
 
     cp = SaveBestParam(dirname='best')
-    early_stop = StopRestore(patience=5)
+    early_stop = StopRestore(patience=10)
     score = Score_ConfusionMatrix(scoring="accuracy", lower_is_better=False)
     pt = PrintLog(keys_ignored="confusion_matrix")
     net = NeuralNetClassifier(
@@ -177,6 +220,10 @@ def train():
     )
     net.set_params(callbacks__valid_acc=score)
     net.set_params(callbacks__print_log=pt)
+
+    # X, y = load_data()
+    # net.fit(X, y)
+    # print(1)
 
     param_dist = {
         'lr': [0.05, 0.01, 0.005],
